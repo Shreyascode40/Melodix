@@ -52,11 +52,17 @@ export function PlayerProvider({children}:{children:React.ReactNode}){
   const setVol=(v:number)=>{ setVolume(v); if(audioRef.current) audioRef.current.volume=v}
   const toggleShuffle=()=>setShuffle(v=>!v)
   const toggleRepeat=()=>setRepeat(r=> r==='off'?'all':r==='all'?'one':'off')
+  const currentIdRef=useRef<string>("")
   useEffect(()=>{
-    const a=audioRef.current; if(!a) return
-    if(currentSong){ a.src=currentSong.stream_url||''; a.volume=volume; if(isPlaying) a.play().catch(()=>setIsPlaying(false)) }
-  },[currentSong])
-  useEffect(()=>{ const a=audioRef.current; if(!a) return; isPlaying? a.play().catch(()=>{}): a.pause()},[isPlaying])
+    const a=audioRef.current; if(!a || !currentSong) return
+    const sid=`${currentSong.provider}:${currentSong.id}`
+    if(currentIdRef.current===sid) return
+    currentIdRef.current=sid
+    a.src=currentSong.stream_url||''
+    a.volume=volume
+    if(isPlaying) a.play().catch(()=>setIsPlaying(false))
+  },[currentSong?.id, currentSong?.provider, currentSong?.stream_url])
+  useEffect(()=>{ const a=audioRef.current; if(!a) return; if(!currentSong) return; a.volume=volume; isPlaying? a.play().catch(()=>{}): a.pause()},[isPlaying, volume, currentSong?.id])
   return <PlayerContext.Provider value={{currentSong,queue,index,isPlaying,currentTime,duration,volume,shuffle,repeat,play,toggle,next,prev,seek,setVol,toggleShuffle,toggleRepeat}}>
     {children}
     <audio ref={audioRef} preload="metadata" onTimeUpdate={e=>setCurrentTime(e.currentTarget.currentTime)} onLoadedMetadata={e=>setDuration(e.currentTarget.duration||0)} onError={()=>{ if(currentSong?.stream_url) { const a=audioRef.current; if(a){ a.src=currentSong.stream_url; a.play().catch(()=>{}) }}}} onEnded={()=>{ if(repeat==='one'){ const a=audioRef.current; if(a){a.currentTime=0;a.play()}} else next()}} />

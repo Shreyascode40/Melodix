@@ -16,14 +16,14 @@ def match_candidates(candidates: List[Dict], limit: int = 3) -> List[Dict]:
         except Exception:
             mb_results = []
         best_mb = mb_results[0] if mb_results else None
-        audius_q = (
+        musicapi_q = (
             f"{best_mb['title']} {best_mb['artist']}".strip() if best_mb else query
         )
         tracks = []
         try:
-            tracks = search_tracks(audius_q, limit=limit + 5)
-            if not tracks and audius_q != query:
-                tracks = search_tracks(query, limit=limit + 5)
+            tracks = search_tracks(musicapi_q, limit=limit + 5, provider="musicapi")
+            if not tracks and musicapi_q != query:
+                tracks = search_tracks(query, limit=limit + 5, provider="musicapi")
         except Exception:
             tracks = []
         if best_mb:
@@ -47,7 +47,7 @@ def match_candidates(candidates: List[Dict], limit: int = 3) -> List[Dict]:
                         "best": {
                             "track": {
                                 "id": best["id"],
-                                "provider": "audius",
+                                "provider": "musicapi",
                                 "title": best["title"],
                                 "artist": best["artist"],
                                 "album": best.get("album") or best_mb.get("album", ""),
@@ -61,7 +61,7 @@ def match_candidates(candidates: List[Dict], limit: int = 3) -> List[Dict]:
                             if best.get("match_score", 0) < 2
                             else best.get("match_score", 0),
                             "needs_review": best.get("match_status") != "high",
-                            "source": "musicbrainz+audius",
+                            "source": "musicbrainz+musicapi",
                         },
                     }
                 )
@@ -119,7 +119,7 @@ def match_candidates(candidates: List[Dict], limit: int = 3) -> List[Dict]:
                         },
                         "score": score,
                         "needs_review": score < 70,
-                        "source": "audius-only",
+                        "source": "musicapi-only",
                     },
                 }
             )

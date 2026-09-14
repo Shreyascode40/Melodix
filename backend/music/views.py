@@ -10,8 +10,8 @@ class SearchView(APIView):
 
     def get(self, request):
         q = request.GET.get("q", "")
-        provider = request.GET.get("provider", "audius")
-        enriched = request.GET.get("enriched", "1") != "0"
+        provider = request.GET.get("provider", "musicapi")
+        enriched = request.GET.get("enriched", "0") == "1"
         try:
             page = max(1, int(request.GET.get("page", "1")))
             limit = min(30, max(1, int(request.GET.get("limit", "12"))))
@@ -28,7 +28,7 @@ class SearchView(APIView):
         from music.search.normalizer import cache_key
         from music.services.music_service import search_enriched
 
-        key = cache_key(nq, page, limit)
+        key = cache_key(nq, page, limit, provider)
         t0 = time.monotonic()
         cached_before = (
             cache.get(key if not enriched else f"music:enriched:{nq}:{limit}")
@@ -58,6 +58,7 @@ class SearchView(APIView):
             )
             resp["X-Cache"] = "HIT" if cached_before else "MISS"
             resp["X-Response-Time"] = f"{total_ms:.0f}ms"
+            resp["Cache-Control"] = "public, max-age=60, stale-while-revalidate=86400"
             return resp
         except Exception:
             stale = cache.get(key)
@@ -75,7 +76,7 @@ class TrendingView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def get(self, request):
-        provider = request.GET.get("provider", "audius")
+        provider = request.GET.get("provider", "musicapi")
         limit = int(request.GET.get("limit", "20"))
         try:
             results = get_trending(limit, provider)
@@ -92,6 +93,28 @@ class TrackDetailView(APIView):
         if not track:
             return Response({"detail": "not found"}, status=404)
         return Response(track)
+
+
+class LyricsView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        track_id = request.GET.get("id") or request.GET.get("track_id")
+        if not track_id:
+            return Response({"detail": "id required"}, status=400)
+        from django.core.cache import cache
+
+        key = f"music:lyrics:{track_id}"
+        cached = cache.get(key)
+        if cached is not None:
+            return Response(cached)
+        from .services.lyrics import get_lyrics
+
+        data = get_lyrics(track_id)
+        if data is None:
+            return Response({"detail": "lyrics not found"}, status=404)
+        cache.set(key, data, 3600)
+        return Response(data)
 
 
 class ResolveSongView(APIView):

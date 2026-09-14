@@ -18,6 +18,8 @@ def normalize_query(q: str) -> str:
     return q
 
 
-def cache_key(query: str, page: int = 1, limit: int = 12) -> str:
+def cache_key(
+    query: str, page: int = 1, limit: int = 12, provider: str = "musicapi"
+) -> str:
     nq = normalize_query(query)
-    return f"music:search:{nq}:{page}:{limit}"
+    return f"music:search:{provider}:{nq}:{page}:{limit}"

@@ -5,18 +5,17 @@ from django.core.cache import cache
 from music.search.normalizer import normalize_query, cache_key
 from music.search.ranking import rank_results
 from music.search.matcher import rank_candidates
-from .audius import AudiusProvider
-from .jamendo import JamendoProvider
+from .musicapi import MusicApiProvider
 
 log = logging.getLogger("music.search")
 
 _providers = {
-    "audius": AudiusProvider(),
-    "jamendo": JamendoProvider(),
+    "musicapi": MusicApiProvider(),
 }
 
 STREAM_CACHE_TTL = 600
 SEARCH_TTL = 900
+STALE_TTL = 86400
 
 
 def get_provider(name: str):
@@ -61,17 +60,19 @@ def search_enriched(query: str, limit: int = 12) -> List[Dict]:
         log.debug(f"MB fail {e}")
     if mb_results:
         best_mb = mb_results[0]
-        audius_q = f"{best_mb['title']} {best_mb['artist']}".strip()
-        candidates = _providers["audius"].search_tracks(audius_q, limit=20, offset=0)
+        musicapi_q = f"{best_mb['title']} {best_mb['artist']}".strip()
+        candidates = _providers["musicapi"].search_tracks(
+            musicapi_q, limit=20, offset=0
+        )
         if not candidates:
-            candidates = _providers["audius"].search_tracks(nq, limit=20, offset=0)
+            candidates = _providers["musicapi"].search_tracks(nq, limit=20, offset=0)
         ranked = rank_candidates(best_mb, candidates)
         out = []
         for r in ranked[:limit]:
             out.append(
                 {
                     "id": r["id"],
-                    "provider": "audius",
+                    "provider": "musicapi",
                     "provider_id": r["id"],
                     "title": r["title"],
                     "artist": r["artist"],
@@ -94,7 +95,7 @@ def search_enriched(query: str, limit: int = 12) -> List[Dict]:
                     "album": best_mb.get("album", ""),
                     "duration": best_mb.get("duration") or 0,
                     "musicbrainz_id": best_mb.get("mbid"),
-                    "provider": "audius",
+                    "provider": "musicapi",
                     "provider_id": "",
                     "playable": False,
                     "match_score": 0,
@@ -102,10 +103,10 @@ def search_enriched(query: str, limit: int = 12) -> List[Dict]:
             ]
         cache.set(key, out, SEARCH_TTL)
         log.debug(
-            f'ENRICHED q="{nq}" MB->Audius total={(time.monotonic() - t0) * 1000:.0f}ms'
+            f'ENRICHED q="{nq}" MB->MusicAPI total={(time.monotonic() - t0) * 1000:.0f}ms'
         )
         return out
-    candidates = _providers["audius"].search_tracks(nq, limit=20, offset=0)
+    candidates = _providers["musicapi"].search_tracks(nq, limit=20, offset=0)
     ranked = rank_results(nq, candidates) if candidates else []
     out = [
         {
@@ -123,7 +124,7 @@ def search_enriched(query: str, limit: int = 12) -> List[Dict]:
 
 
 def search_tracks(
-    query: str, provider: str = "audius", limit: int = 12, offset: int = 0
+    query: str, provider: str = "musicapi", limit: int = 12, offset: int = 0
 ) -> List[Dict]:
     if provider == "enriched":
         return search_enriched(query, limit)
@@ -133,12 +134,18 @@ def search_tracks(
     if not nq:
         return []
     page = offset // limit + 1 if limit else 1
-    key = cache_key(nq, page, limit)
+    key = cache_key(nq, page, limit, provider)
     cached = cache.get(key)
     if cached is not None:
         return cached
+    stale_key = f"{key}:stale"
+    stale = cache.get(stale_key)
+    if stale is not None:
+        return stale
     results = (
-        _providers.get(provider, _providers["audius"]).search_tracks(nq, limit, offset)
+        _providers.get(provider, _providers["musicapi"]).search_tracks(
+            nq, limit, offset
+        )
         if provider in _providers
         else []
     )
@@ -164,23 +171,27 @@ def search_tracks(
     ]
     try:
         cache.set(key, results, SEARCH_TTL)
+        cache.set(stale_key, results, STALE_TTL)
     except:
         pass
     return results
 
 
-def get_trending(limit: int = 12, provider: str = "audius") -> List[Dict]:
+def get_trending(limit: int = 12, provider: str = "musicapi") -> List[Dict]:
     key = f"music:trending:{provider}:{limit}"
     c = cache.get(key)
     if c is not None:
         return c
-    p = _providers.get(provider, _providers["audius"])
+    stale_key = f"{key}:stale"
+    stale = cache.get(stale_key)
+    p = _providers.get(provider, _providers["musicapi"])
     try:
         r = p.get_trending_tracks(limit)
         cache.set(key, r, 600)
+        cache.set(stale_key, r, STALE_TTL)
         return r
     except:
-        return c or []
+        return stale or c or []
 
 
 def get_track(provider: str, track_id: str) -> Optional[Dict]:
